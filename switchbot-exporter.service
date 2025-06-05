@@ -1,0 +1,14 @@
+[Unit]
+Description=SwitchBot temperature and humidity Prometheus exporter
+After=network.target bluetooth.service
+Requires=bluetooth.service
+
+[Service]
+ExecStartPre=/bin/bash -c 'until hciconfig hci0 up; do sleep 1; done'
+ExecStart=/usr/local/bin/switchbot-exporter
+Restart=always
+User=root
+Environment=GO_ENV=production
+
+[Install]
+WantedBy=multi-user.target
