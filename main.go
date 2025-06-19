@@ -12,6 +12,7 @@ import (
 	"os/signal"
 	"strings"
 	"syscall"
+	"time"
 
 	"log/slog"
 
@@ -46,6 +47,7 @@ func loadDevices() (map[string]string, error) {
 // 対象デバイスのMACアドレスと名前のマップ
 var switchbotDevices = map[string]string{}
 
+// 温湿度計
 var (
 	temperatureGauge = prometheus.NewGaugeVec(
 		prometheus.GaugeOpts{
@@ -70,10 +72,21 @@ var (
 	)
 )
 
+// MH-Z19C
+var (
+	co2Gauge = prometheus.NewGauge(
+		prometheus.GaugeOpts{
+			Name: "co2_ppm",
+			Help: "CO2濃度",
+		},
+	)
+)
+
 func init() {
 	prometheus.MustRegister(temperatureGauge)
 	prometheus.MustRegister(humidityGauge)
 	prometheus.MustRegister(rssiGauge)
+	prometheus.MustRegister(co2Gauge)
 }
 
 func main() {
@@ -87,6 +100,29 @@ func main() {
 		http.Handle("/metrics", promhttp.Handler())
 		slog.Info("Prometheus metrics exporter started", "url", fmt.Sprintf("http://localhost:%d/metrics", *port))
 		http.ListenAndServe(addr, nil)
+	}()
+
+	go func() {
+		mhz19cClient, err := Open("/dev/serial0")
+		if err != nil {
+			slog.Error("MH-Z19Cへの接続失敗", "error", err)
+			return
+		}
+
+		mhz19cClient.DisableABC()
+
+		for {
+			co2, err := mhz19cClient.ReadCO2()
+			if err != nil {
+				slog.Error("CO2濃度取得失敗", "error", err)
+				co2Gauge.Set(math.NaN())
+			} else {
+				slog.Info("CO2濃度取得", "co2", co2)
+				co2Gauge.Set(float64(co2))
+			}
+
+			time.Sleep(10 * time.Second)
+		}
 	}()
 
 	// デバイス情報の読み込み
@@ -104,7 +140,7 @@ func main() {
 	slog.Info("スキャン開始")
 	err = ble.Scan(ctx, false, advHandler, nil)
 	if err != nil {
-		slog.Error("scan error", "error", err)
+		slog.Error("スキャンエラー", "error", err)
 		os.Exit(1)
 	}
 }
