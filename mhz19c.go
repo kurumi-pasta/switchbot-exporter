@@ -38,10 +38,7 @@ func (c *MHZ19CClient) DisableABC() error {
 		return err
 	}
 	// レスポンスを消費
-	time.Sleep(100 * time.Millisecond)
-	buf := make([]byte, 9)
-	c.p.Read(buf)
-
+	c.readResponse()
 	return nil
 }
 
@@ -52,27 +49,46 @@ func (c *MHZ19CClient) ReadCO2() (int, error) {
 		return 0, err
 	}
 
-	time.Sleep(100 * time.Millisecond)
-	buf := make([]byte, 9)
-	// 0xFFまで消費
-	for {
-		if _, err := c.p.Read(buf[0:1]); err != nil {
-			return 0, err
-		}
-		if buf[0] == 0xFF {
-			break
-		}
-	}
-
-	// 残りを読み込む
-	if _, err := c.p.Read(buf[1:]); err != nil {
+	buf, err := c.readResponse()
+	if err != nil {
 		return 0, err
 	}
-
 	if buf[1] != 0x86 {
 		return 0, fmt.Errorf("unexpected format % X", buf)
 	}
 
 	co2 := int(buf[2])<<8 + int(buf[3])
 	return co2, nil
+}
+
+func (c *MHZ19CClient) readResponse() ([]byte, error) {
+	size := 9
+	buf := make([]byte, size)
+	readSize := 0
+	retryCount := 0
+	time.Sleep(time.Millisecond)
+	for {
+		retryCount++
+		n, err := c.p.Read(buf[readSize:])
+		if err != nil {
+			return nil, err
+		}
+
+		readSize += n
+		if readSize == size {
+			break
+		}
+
+		if retryCount >= 20 {
+			return nil, fmt.Errorf("timeout reading response, read %d bytes", readSize)
+		}
+
+		time.Sleep(time.Millisecond)
+	}
+
+	if buf[0] != 0xFF {
+		return nil, fmt.Errorf("unexpected response start byte %02X, expected 0xFF", buf[0])
+	}
+
+	return buf, nil
 }

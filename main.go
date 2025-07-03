@@ -111,17 +111,28 @@ func main() {
 
 		mhz19cClient.DisableABC()
 
+		readTicker := time.NewTicker(10 * time.Second)
+		abcTicker := time.NewTicker(1 * time.Hour)
 		for {
-			co2, err := mhz19cClient.ReadCO2()
-			if err != nil {
-				slog.Error("CO2濃度取得失敗", "error", err)
-				co2Gauge.Set(math.NaN())
-			} else {
-				slog.Info("CO2濃度取得", "co2", co2)
-				co2Gauge.Set(float64(co2))
+			select {
+			case <-context.Background().Done():
+				return
+			case <-readTicker.C:
+				co2, err := mhz19cClient.ReadCO2()
+				if err != nil {
+					slog.Error("CO2濃度取得失敗", "error", err)
+					co2Gauge.Set(math.NaN())
+				} else {
+					slog.Info("CO2濃度取得", "co2", co2)
+					co2Gauge.Set(float64(co2))
+				}
+			case <-abcTicker.C:
+				if err := mhz19cClient.DisableABC(); err != nil {
+					slog.Error("自動校正の無効化に失敗", "error", err)
+				} else {
+					slog.Info("自動校正を無効化しました")
+				}
 			}
-
-			time.Sleep(10 * time.Second)
 		}
 	}()
 
